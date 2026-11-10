@@ -72,12 +72,14 @@ function mail_set(PDO $pdo, $key, $value) {
 function mail_conf(PDO $pdo) {
     $g = function ($k, $d = '') use ($pdo) { return trim(mail_get($pdo, $k, $d)); };
     $sec = function ($v) { return in_array($v, ['ssl', 'tls', 'none'], true) ? $v : 'ssl'; };
+    // «رمز برنامه»ی Google را با فاصله نشان می‌دهد؛ برای Gmail فاصله‌ها حذف می‌شود
+    $pw = function ($host, $pass) { return preg_match('/(^|\.)(gmail|googlemail)\.com$/i', $host) ? preg_replace('/\s+/', '', $pass) : $pass; };
     return [
         'smtp_host'     => $g('smtp_host'),
         'smtp_port'     => (int)($g('smtp_port', '465') ?: 465),
         'smtp_secure'   => $sec($g('smtp_secure', 'ssl')),
         'smtp_user'     => $g('smtp_user'),
-        'smtp_pass'     => mail_get($pdo, 'smtp_pass', ''),
+        'smtp_pass'     => $pw($g('smtp_host'), mail_get($pdo, 'smtp_pass', '')),
         'from_email'    => $g('from_email'),
         'from_name'     => $g('from_name') ?: (defined('SITE_NAME') ? SITE_NAME : ''),
         'notify_email'  => $g('notify_email'),
@@ -87,7 +89,7 @@ function mail_conf(PDO $pdo) {
         'imap_port'     => (int)($g('imap_port', '993') ?: 993),
         'imap_secure'   => $sec($g('imap_secure', 'ssl')),
         'imap_user'     => $g('imap_user'),
-        'imap_pass'     => mail_get($pdo, 'imap_pass', ''),
+        'imap_pass'     => $pw($g('imap_host'), mail_get($pdo, 'imap_pass', '')),
         'imap_enabled'  => $g('imap_enabled', '0') === '1',
     ];
 }
