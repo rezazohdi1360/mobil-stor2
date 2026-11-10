@@ -11,16 +11,31 @@ mail_ensure($pdo);
 
 $msg = ''; $msgOk = true;
 $hostOk = function ($h) { return $h === '' || preg_match('/^[A-Za-z0-9.\-]{1,190}$/', $h); };
+// آدرس سرور را «هوشمند» پاک می‌کند: imap://host:993/ → host  (پورت جدا برمی‌گردد)
+$hostClean = function ($raw) {
+    $h = trim((string)$raw);
+    $h = preg_replace('#^[A-Za-z][A-Za-z0-9+.\-]*://#', '', $h);   // پروتکل
+    $h = preg_replace('#[/?\#].*$#', '', $h);                       // مسیر
+    $port = null;
+    if (preg_match('/^(.*):(\d{1,5})$/', $h, $m)) { $h = $m[1]; $port = (int)$m[2]; }
+    $h = trim(str_replace(["\u{200c}", "\u{200e}", "\u{200f}", ' ', "\t"], '', $h), '. ');
+    return [$h, $port];
+};
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!mail_csrf_ok()) {
         $msg = 'نشست شما منقضی شده است؛ صفحه را دوباره باز کنید.'; $msgOk = false;
     } else {
-        if (isset($_POST['save_mail'])) {
+        $saved = false;
+        // دکمه‌های تست هم ابتدا فرم را ذخیره می‌کنند
+        if (isset($_POST['save_mail']) || isset($_POST['test_smtp']) || isset($_POST['test_imap'])) {
             $errs = [];
-            $smtpHost = trim($_POST['smtp_host'] ?? ''); $imapHost = trim($_POST['imap_host'] ?? '');
-            if (!$hostOk($smtpHost)) $errs[] = 'آدرس سرور SMTP نامعتبر است (فقط حروف انگلیسی، عدد، نقطه و خط تیره).';
-            if (!$hostOk($imapHost)) $errs[] = 'آدرس سرور IMAP نامعتبر است.';
+            [$smtpHost, $smtpPortIn] = $hostClean($_POST['smtp_host'] ?? '');
+            [$imapHost, $imapPortIn] = $hostClean($_POST['imap_host'] ?? '');
+            if ($smtpPortIn) $_POST['smtp_port'] = $smtpPortIn;
+            if ($imapPortIn) $_POST['imap_port'] = $imapPortIn;
+            if (!$hostOk($smtpHost)) $errs[] = 'آدرس سرور SMTP نامعتبر است («' . ($_POST['smtp_host'] ?? '') . '»). فقط آدرس سرور را بنویسید، مثل smtp.gmail.com';
+            if (!$hostOk($imapHost)) $errs[] = 'آدرس سرور IMAP نامعتبر است («' . ($_POST['imap_host'] ?? '') . '»). فقط آدرس سرور را بنویسید، مثل imap.gmail.com';
             $from = trim($_POST['from_email'] ?? ''); $notify = trim($_POST['notify_email'] ?? '');
             if ($from !== '' && !filter_var($from, FILTER_VALIDATE_EMAIL)) $errs[] = 'ایمیل فرستنده معتبر نیست.';
             if ($notify !== '' && !filter_var($notify, FILTER_VALIDATE_EMAIL)) $errs[] = 'ایمیل دریافت اطلاع‌رسانی معتبر نیست.';
@@ -45,10 +60,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (($_POST['imap_pass'] ?? '') !== '') mail_set($pdo, 'imap_pass', $_POST['imap_pass']);
                 mail_set($pdo, 'imap_enabled', isset($_POST['imap_enabled']) ? '1' : '0');
                 if (mail_get($pdo, 'cron_key', '') === '') mail_set($pdo, 'cron_key', bin2hex(random_bytes(16)));
-                $msg = 'تنظیمات ذخیره شد.';
+                $msg = 'تنظیمات ذخیره شد.'; $saved = true;
             }
         }
-        if (isset($_POST['test_smtp'])) {
+        if (isset($_POST['test_smtp']) && $saved) {
             $c = mail_conf($pdo);
             $to = trim($_POST['test_to'] ?? '');
             if (!filter_var($to, FILTER_VALIDATE_EMAIL)) { $msg = 'برای تست، یک ایمیل معتبر به‌عنوان گیرنده وارد کنید.'; $msgOk = false; }
@@ -61,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Throwable $e) { $msg = $e->getMessage(); $msgOk = false; }
             }
         }
-        if (isset($_POST['test_imap'])) {
+        if (isset($_POST['test_imap']) && $saved) {
             $c = mail_conf($pdo);
             if (!mail_imap_ready($c)) { $msg = 'ابتدا تنظیمات IMAP (سرور، نام کاربری و رمز) را ذخیره کنید.'; $msgOk = false; }
             else {
@@ -162,7 +177,7 @@ $secSel = function ($name, $cur) {
     </div>
 
     <section class="bg-white border border-slate-200 rounded-2xl p-5">
-      <h2 class="font-black text-slate-800 mb-3">🧪 آزمایش اتصال <span class="text-[11px] font-normal text-slate-400">(ابتدا تنظیمات را ذخیره کنید)</span></h2>
+      <h2 class="font-black text-slate-800 mb-3">🧪 آزمایش اتصال <span class="text-[11px] font-normal text-slate-400">(فرم قبل از تست خودکار ذخیره می‌شود)</span></h2>
       <div class="flex gap-2 flex-wrap items-center">
         <input name="test_to" type="email" dir="ltr" placeholder="ایمیل گیرنده‌ی آزمایشی" value="<?= sanitize($c['notify_email'] ?: $c['from_email']) ?>" class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm w-64">
         <button name="test_smtp" value="1" class="bg-slate-800 text-white font-bold px-5 py-2.5 rounded-xl text-xs">📨 ارسال ایمیل آزمایشی</button>
